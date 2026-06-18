@@ -36,6 +36,11 @@ Single-file French-learning PWA for **two named users** (Anthony, Amy) prepping 
 ## AI conversation
 - `callAI` posts to the Worker URL if set, else the keyless direct endpoint (**that direct path only works inside a claude.ai Artifact, not on GitHub Pages** — real devices need the Worker). `buildSystem` enforces a strict minified-JSON contract `{fr,en,phon,note,done}`, level-calibrated per user.
 - Models: Worker default `claude-haiku-4-5-20251001`, option `claude-sonnet-4-6`; `DIRECT_MODEL` is for the artifact path only. Scenes that need AI are locked in the UI until a Worker URL is set.
+- **`worker.js` is dual-route:** `POST /` → Anthropic proxy (needs `ANTHROPIC_API_KEY` secret); `POST /stt` → Workers AI Whisper (`@cf/openai/whisper-large-v3-turbo`, base64 audio + `language:"fr"`, needs the `AI` binding). The base64 encode is hand-rolled to avoid needing `nodejs_compat`.
+
+## Speech input (two paths)
+- **Android/desktop Chrome:** browser `SpeechRecognition` (instant, offline). **iOS is forced off** (`SR` null on iOS) because Safari's implementation is broken — goes live, returns nothing.
+- **iPhone:** when a Worker URL is set, the mic records via `MediaRecorder` (`recToggle`, tap-to-start/tap-to-stop, 6s safety auto-stop) → POSTs the clip to `/stt` → feeds the transcript into the **same `wordMarks` scoring** as the browser path. `micReady() = SR || sttReady()` gates every mic button, so on iOS-without-Worker the mic simply doesn't show (no broken button). Needs connectivity; Reveal is the offline fallback.
 
 ## How to test (do this every change — there is no test runner)
 1. **Syntax** — extract inline JS and `node --check`:

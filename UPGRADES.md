@@ -49,9 +49,14 @@ match /allez/{house}/{doc=**} { allow read, write: if true; }
 2. [ ] **Workers & Pages → Create → Create Worker** → name it `allez` → **Deploy** (the hello-world it offers)
 3. [ ] **Edit code** → select all → delete → paste the contents of `worker.js` → **Deploy**
 4. [ ] Back on the worker's page → **Settings → Variables and Secrets → Add** → type **Secret** → name exactly `ANTHROPIC_API_KEY` → value = your key → save/deploy
-5. [ ] Copy the worker URL — it looks like `https://allez.<your-subdomain>.workers.dev`
+5. [ ] **Add the speech binding** (this is what powers Amy's iPhone mic): same Worker → **Settings → Bindings → Add → Workers AI** → variable name exactly `AI` → save/deploy. No extra account or key — Workers AI is on by default; first use may prompt you to enable it.
+6. [ ] Copy the worker URL — it looks like `https://allez.<your-subdomain>.workers.dev`
 
-### Part C — smoke test from a terminal (optional, 1 min)
+### Part C — what the binding unlocks (the iPhone fix)
+
+The Worker now does two things on one URL: `/` proxies the conversation, and `/stt` runs **Whisper speech-to-text** on Cloudflare's edge. That second route is what gives Amy's iPhone the "✓ that sounded right" pronunciation check — her phone records the clip, the Worker transcribes it, and the app scores it exactly like your Pixel does. Cost is ~£0.0004 per phrase, effectively free, and well inside the Workers AI free daily allowance. It needs a connection, so Reveal stays as her offline fallback.
+
+### Part D — smoke test from a terminal (optional, 1 min)
 
 ```bash
 curl -s https://allez.YOURNAME.workers.dev -X POST \
@@ -61,11 +66,12 @@ curl -s https://allez.YOURNAME.workers.dev -X POST \
 
 JSON containing "Bonjour" = working. `authentication_error` = secret missing or misnamed.
 
-### Part D — connect the app (1 min)
+### Part E — connect the app (1 min)
 
 1. [ ] Allez ⚙️ → paste the Worker URL → tap **🤖 Test AI connection** → expect *"✓ AI connected — Bonjour Anthony et Amy !"*
-2. [ ] **Save settings.** Parler is now a live conversation partner and the **À deux** tab is unlocked.
+2. [ ] **Save settings.** Parler is now a live conversation partner and the **À deux** tab is unlocked. On Amy's iPhone, the 🎙️ button now appears in drills and works via the Worker.
 3. [ ] Model: start on **Haiku** (fast, pennies). Flip to **Sonnet** in ⚙️ when you want sharper, more natural French.
+4. [ ] **Test the iPhone mic:** on Amy's phone, start a session, tap 🎙️, say the phrase, tap 🎙️ again to stop — it should transcribe and mark you. (On the Pixel the mic auto-stops on silence; on iPhone it's tap-to-start, tap-to-stop.)
 
 ---
 
@@ -96,6 +102,9 @@ It's a one-off run on your always-on PC — no account, free:
 | ⚙️ shows *"Sync: Error: …"* | Config pasted partially. Paste the **whole** block, braces included (JS or JSON both fine now). |
 | Amy's progress not appearing | Both phones must show *Connected ✓* and the **same** household code. Changes push ~1s after you grade a card; give it ten seconds. |
 | Bookshelf broke after editing rules | You replaced instead of added. Rules tab → version history → restore, then add the two `allez` lines inside the existing block. |
+| iPhone mic does nothing / "Speech check failed — HTTP 500" | The Worker is missing the `AI` binding. Worker → Settings → Bindings → add Workers AI, variable name exactly `AI`, redeploy. |
+| iPhone 🎙️ not showing at all | Worker URL not saved on that phone. Each phone needs the URL pasted in ⚙️. (The mic only appears on iPhone once the Worker is set, by design — iOS's own recognition is broken.) |
+| iPhone mic "Speech check failed — HTTP 400/404" | URL/route problem — make sure you pasted the base Worker URL (no trailing path); the app adds `/stt` itself. |
 
 ## Costs, honestly
 

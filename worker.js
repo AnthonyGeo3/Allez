@@ -1,11 +1,13 @@
-// Allez! — Cloudflare Worker proxy for the Anthropic API
+// Allez! — Cloudflare Worker. Two jobs in one Worker:
+//   1. POST /      → proxies to the Anthropic API (live conversation + À deux).
+//                    Needs the secret  ANTHROPIC_API_KEY.
+//   2. POST /stt   → speech-to-text via Workers AI Whisper, so the 🎙️
+//                    pronunciation check works on iPhone (where the browser's
+//                    own speech recognition is broken). Needs the  AI  binding.
 //
-// Why this exists: the app can't ship with an API key in it (anyone could read
-// it from the page source). This tiny worker holds the key as a secret and
-// forwards requests. Paste this whole file into a new Cloudflare Worker, then
-// add a secret named ANTHROPIC_API_KEY (Worker → Settings → Variables).
-//
-// The app sends a standard /v1/messages request body; we just add the headers.
+// Full setup is in UPGRADES.md §2. You need BOTH of these on the Worker:
+//   • Secret   ANTHROPIC_API_KEY   (Settings → Variables and Secrets → add Secret)
+//   • Binding  AI = Workers AI     (Settings → Bindings → add → Workers AI, name it AI)
 
 export default {
   async fetch(request, env) {
@@ -14,20 +16,30 @@ export default {
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     };
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+    if (request.method !== "POST") return new Response("POST only", { status: 405, headers: cors });
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: cors });
-    }
-    if (request.method !== "POST") {
-      return new Response("POST only", { status: 405, headers: cors });
-    }
-    if (!env.ANTHROPIC_API_KEY) {
-      return new Response(
-        JSON.stringify({ error: "Worker is missing the ANTHROPIC_API_KEY secret" }),
-        { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
-      );
+    const url = new URL(request.url);
+
+    // --- 2. Speech-to-text route ---
+    if (url.pathname.replace(/\/+$/, "").endsWith("/stt")) {
+      if (!env.AI) return json({ error: "Worker is missing the AI (Workers AI) binding — see UPGRADES.md §2" }, 500, cors);
+      try {
+        const buf = await request.arrayBuffer();
+        if (!buf || buf.byteLength < 1200) return json({ text: "" }, 200, cors); // empty / too short to be speech
+        const out = await env.AI.run("@cf/openai/whisper-large-v3-turbo", {
+          audio: toBase64(buf),
+          language: "fr",
+          task: "transcribe",
+        });
+        return json({ text: (out && out.text ? out.text : "").trim() }, 200, cors);
+      } catch (e) {
+        return json({ error: String((e && e.message) || e) }, 500, cors);
+      }
     }
 
+    // --- 1. Anthropic conversation proxy (default route) ---
+    if (!env.ANTHROPIC_API_KEY) return json({ error: "Worker is missing the ANTHROPIC_API_KEY secret — see UPGRADES.md §2" }, 500, cors);
     const upstream = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -37,9 +49,20 @@ export default {
       },
       body: await request.text(),
     });
-
     const res = new Response(upstream.body, upstream);
     for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
     return res;
   },
 };
+
+// base64-encode without needing the Node Buffer polyfill (clips are small)
+function toBase64(buf) {
+  const b = new Uint8Array(buf);
+  let s = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < b.length; i += chunk) s += String.fromCharCode.apply(null, b.subarray(i, i + chunk));
+  return btoa(s);
+}
+function json(obj, status, cors) {
+  return new Response(JSON.stringify(obj), { status, headers: { ...cors, "Content-Type": "application/json" } });
+}

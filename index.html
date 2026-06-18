@@ -489,7 +489,12 @@ window.say=(id,slow)=>{const p=PHRASES.find(x=>x.id===id);if(!p)return;
  speak(p.f,slow)}
 
 // ---------- SPEECH RECOGNITION ----------
-const SR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
+const isIOS=/iP(hone|od|ad)/.test(navigator.platform||"")||(/Mac/.test(navigator.platform||"")&&(navigator.maxTouchPoints||0)>1)||/iPhone|iPad|iPod/.test(navigator.userAgent||"");
+const SR=(!isIOS&&(window.SpeechRecognition||window.webkitSpeechRecognition))||null;
+const REC_OK=("MediaRecorder"in window)&&!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
+const sttReady=()=>REC_OK&&!!S.settings.workerUrl.trim();
+const micReady=()=>!!SR||sttReady();
+const sttUrl=()=>S.settings.workerUrl.trim().replace(/\/+$/,"")+"/stt";
 function listen(){return new Promise((res,rej)=>{if(!SR)return rej(new Error("nosr"));
  const r=new SR();r.lang="fr-FR";r.interimResults=false;r.maxAlternatives=3;let done=false;
  r.onresult=e=>{done=true;const alts=[...e.results[0]].map(a=>a.transcript);res(alts)};
@@ -502,6 +507,34 @@ function micErr(e){const m=(e&&e.message)||"";
  if(m==="no-speech"||m==="silence")return "Didn't catch anything — try again";
  if(m==="network")return "Speech service needs a connection — try Reveal for now";
  return "Mic error — try again or tap Reveal"}
+// Recorded-audio path for devices where browser recognition doesn't work (iPhone):
+// capture a clip, POST it to the Worker's /stt route (Whisper), hand back the text.
+let REC=null,recChunks=[],recStream=null,recTimer=null,RECORDING=false;
+async function recToggle(onResult,btn){
+ if(!RECORDING){
+  try{
+   recStream=await navigator.mediaDevices.getUserMedia({audio:true});
+   recChunks=[];REC=new MediaRecorder(recStream);
+   REC.ondataavailable=e=>{if(e.data&&e.data.size)recChunks.push(e.data)};
+   REC.onstop=async()=>{
+    try{recStream.getTracks().forEach(t=>t.stop())}catch(e){}
+    const blob=new Blob(recChunks,{type:(recChunks[0]&&recChunks[0].type)||"audio/mp4"});
+    try{
+     const r=await fetch(sttUrl(),{method:"POST",headers:{"Content-Type":blob.type||"application/octet-stream"},body:blob});
+     if(!r.ok)throw new Error("HTTP "+r.status);
+     const d=await r.json();if(d.error)throw new Error(d.error);
+     onResult((d.text||"").trim(),null);
+    }catch(e){onResult(null,e)}
+   };
+   REC.start();RECORDING=true;btn&&btn.classList.add("live");
+   toast("Recording — tap the mic again to stop");
+   clearTimeout(recTimer);recTimer=setTimeout(()=>{if(RECORDING)recToggle(onResult,btn)},6000);
+  }catch(e){toast(isIOS?"Let Safari use the mic, then tap again":"Mic didn't start — check permission")}
+ }else{
+  RECORDING=false;clearTimeout(recTimer);btn&&btn.classList.remove("live");toast("Checking…");
+  try{REC.stop()}catch(e){}
+ }
+}
 
 // ---------- SRS ----------
 function srsOf(p,id){if(!p.srs[id])p.srs[id]={ease:2.5,iv:0,due:0,reps:0};return p.srs[id]}
@@ -599,7 +632,9 @@ async function sendChat(){const inp=$("#chatIn");const text=(inp?inp.value:"").t
  catch(e){CHAT.busy=false;
   if(!aiOK&&SCRIPTS[CHAT.scen.id]&&!CHAT.duo){CHAT.useScript=true;toast("No AI connection — switching to the built-in scripted scene");scriptStep(text);render()}
   else{CHAT.msgs.push({role:"hint",text:"Couldn't reach the AI ("+(e.message||"error")+"). Check the endpoint in ⚙️, then try again."});render()}}}
-async function micChat(){try{const btn=$("#chatMic");btn&&btn.classList.add("live");const alts=await listen();btn&&btn.classList.remove("live");const v=alts[0]||"";const inp=$("#chatIn");if(inp){inp.value=v;inp.focus()}}catch(e){const btn=$("#chatMic");btn&&btn.classList.remove("live");toast(micErr(e))}}
+async function micChat(){const btn=$("#chatMic");
+ if(SR){try{btn&&btn.classList.add("live");const alts=await listen();btn&&btn.classList.remove("live");const v=alts[0]||"";const inp=$("#chatIn");if(inp){inp.value=v;inp.focus()}}catch(e){btn&&btn.classList.remove("live");toast(micErr(e))}return}
+ recToggle((text,err)=>{if(err){toast("Speech check failed — "+(err.message||"try again"));return}if(!text){toast("Didn't catch that — try again");return}const inp=$("#chatIn");if(inp){inp.value=text;inp.focus()}},btn)}
 
 // ---------- DRILL SESSION ----------
 let SES=null; // {q:[],i,phase,heard,isNew}
@@ -611,10 +646,14 @@ function prepCard(){const p=me();const item=SES.q[SES.i];resetToday(p);
  if(SES.isNew){srsOf(p,item.id);p.today.newCount++;save()}
  if(SES.isNew||SES.dir==="listen")setTimeout(()=>say(item.id),350)}
 function reveal(){SES.phase="back";render();say(SES.q[SES.i].id)}
-async function micDrill(){const item=SES.q[SES.i];
- try{const btn=$("#drillMic");btn&&btn.classList.add("live");const alts=await listen();btn&&btn.classList.remove("live");
-  const r=wordMarks(item.f,alts);SES.heard={ok:r.score>=0.72,text:r.heard,marks:r.marks};reveal()}
- catch(e){const btn=$("#drillMic");btn&&btn.classList.remove("live");toast(micErr(e))}}
+async function micDrill(){const item=SES.q[SES.i];const btn=$("#drillMic");
+ if(SR){
+  try{btn&&btn.classList.add("live");const alts=await listen();btn&&btn.classList.remove("live");
+   const r=wordMarks(item.f,alts);SES.heard={ok:r.score>=0.72,text:r.heard,marks:r.marks};reveal()}
+  catch(e){btn&&btn.classList.remove("live");toast(micErr(e))}
+  return}
+ recToggle((text,err)=>{if(err){toast("Speech check failed — "+(err.message||"try again"));return}if(!text){toast("Didn't catch that — try again");return}
+  const r=wordMarks(item.f,[text]);SES.heard={ok:r.score>=0.72,text:r.heard,marks:r.marks};reveal()},btn)}
 function doGrade(g){const p=me();const item=SES.q[SES.i];grade(p,item.id,g);resetToday(p);p.today.cards++;
  if(g==="again"){SES.q.splice(Math.min(SES.q.length,SES.i+3),0,item)}
  SES.i++;
@@ -643,7 +682,7 @@ function render(){renderNav();renderStreak();const v=$("#view");
    <button class="btn ghost" onclick="startSession(document.getElementById('catSel').value)">Theme</button></div>
    <button class="btn ghost big" style="margin-top:12px" onclick="openBook()">📖 Browse the phrasebook</button>
    <button class="btn ghost big" style="margin-top:10px" onclick="startNumbers()">🔢 Numbers, prices &amp; times</button></div>
-  <div class="card"><h3>How it works</h3><p class="muted">You'll hear and say French before you ever have to read it. Tap 🔈 if you want to hear the answer first${SR?", speak with 🎙️":" and say it aloud, then tap Reveal to check"}, and grade yourself honestly — the app decides when each phrase comes back.</p></div>`;return}
+  <div class="card"><h3>How it works</h3><p class="muted">You'll hear and say French before you ever have to read it. Tap 🔈 if you want to hear the answer first${micReady()?", speak with 🎙️":" and say it aloud, then tap Reveal to check"}, and grade yourself honestly — the app decides when each phrase comes back.</p></div>`;return}
 
  if(TAB==="parler"||TAB==="duo"){if(CHAT){renderChat(v);return}
   const duo=TAB==="duo";const hasAI=!!(S.settings.workerUrl.trim()||aiOK);
@@ -767,7 +806,7 @@ function renderDrill(v){const item=SES.q[SES.i];const p=me();const lvl=p.level;
   <h2 style="text-align:center;margin:6px 0 18px">“${esc(item.e)}”</h2>
   <div class="row" style="justify-content:center;gap:14px">
    <button class="iconbtn" onclick="say(SES.q[SES.i].id)" aria-label="Hear the answer" title="Hear the answer">🔈</button>
-   ${SR?`<button id="drillMic" class="iconbtn rec" onclick="micDrill()" aria-label="Say it">🎙️</button>`:""}
+   ${micReady()?`<button id="drillMic" class="iconbtn rec" onclick="micDrill()" aria-label="Say it">🎙️</button>`:""}
    <button class="btn ghost" onclick="reveal()">Reveal</button></div>
   <p class="muted" style="text-align:center;margin-top:14px">Say it out loud — even badly. 🔈 plays the answer if you're stuck.</p>`}}
  else{
@@ -780,7 +819,7 @@ function renderDrill(v){const item=SES.q[SES.i];const p=me();const lvl=p.level;
   <div class="row" style="justify-content:center;gap:14px;margin-top:14px">
    <button class="iconbtn" onclick="say(SES.q[SES.i].id)" aria-label="Play">🔊</button>
    <button class="iconbtn" onclick="say(SES.q[SES.i].id,true)" aria-label="Play slowly" title="Slow">🐢</button>
-   ${SR?`<button id="drillMic" class="iconbtn rec" onclick="micDrill()" aria-label="Try saying it">🎙️</button>`:""}</div>
+   ${micReady()?`<button id="drillMic" class="iconbtn rec" onclick="micDrill()" aria-label="Try saying it">🎙️</button>`:""}</div>
   <div class="grade-row">
    <button class="btn g-again" onclick="doGrade('again')">Encore<br><span class="muted" style="font-size:.78rem">soon</span></button>
    <button class="btn g-good" onclick="doGrade('good')">Bien<br><span class="muted" style="font-size:.78rem">normal</span></button>
@@ -802,7 +841,7 @@ function renderChat(v){const c=CHAT;const lvl1=me().level===1;const draft=(docum
  <div class="chat">${bubbles}${c.busy?`<div class="bub-ai"><div class="plaque mini"><div class="fr">…</div></div></div>`:""}
  ${c.ended?`<div class="sessiondone"><div class="em">🎉</div><h3>Fin de la scène !</h3><p class="muted">${c.userTurns>=3?"That counts towards today's streak.":"Nice warm-up — a few more turns next time counts for your streak."}</p><button class="btn" onclick="CHAT=null;render()">Choose another scene</button></div>`:""}</div>
  ${c.ended?"":`<div class="chatbar"><input id="chatIn" placeholder="${c.duo?c.turn+", réponds en français…":"Réponds en français…"}" value="${esc(draft)}" lang="fr" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" onkeydown="if(event.key==='Enter')sendChat()">
- ${SR?`<button id="chatMic" class="iconbtn rec" onclick="micChat()" aria-label="Speak">🎙️</button>`:""}
+ ${micReady()?`<button id="chatMic" class="iconbtn rec" onclick="micChat()" aria-label="Speak">🎙️</button>`:""}
  <button class="iconbtn" style="background:var(--bleu);color:#fff;border-color:var(--bleu)" onclick="sendChat()" aria-label="Send">➤</button></div>`}`;
  const sc=$("#view");sc&&window.scrollTo(0,document.body.scrollHeight)}
 window.toggleEn=i=>{CHAT.msgs[i].open=!CHAT.msgs[i].open;render()};
@@ -821,7 +860,7 @@ function renderSettings(){const p=me();loadVoices();
  <button class="btn soft" style="margin-top:8px" onclick="speak('Bonjour ! Bienvenue à Paris.')">🔊 Test voice</button>${AUDIO?`<p class="muted" style="margin-top:8px">🎧 Premium audio pack active — ${Object.keys(AUDIO.files).length} studio-voice phrases (drills & phrasebook use it automatically).</p>`:""}${VOICES.length?"":`<p class="muted" style="margin-top:8px">⚠️ No French voice loaded yet. Tap 🔊 Test voice once and reopen ⚙️ (phones load voices lazily). If it still sounds English — Android: system Settings → text-to-speech → add French. iPhone: Settings → Accessibility → Spoken Content → Voices → French → download an <strong>Enhanced</strong> voice (big quality jump).</p>`}</div>
  <div class="field"><label>New phrases per day — ${p.newPerDay}</label><input type="range" min="4" max="25" step="1" value="${p.newPerDay}" oninput="setNew(this.value)"></div>
  <h3 style="margin-top:18px">AI conversation</h3>
- <div class="field"><label>Worker URL (see SETUP.md)</label><input id="setWorker" placeholder="https://allez.yourname.workers.dev" value="${esc(S.settings.workerUrl)}"></div>
+ <div class="field"><label>Worker URL (see UPGRADES.md)</label><input id="setWorker" placeholder="https://allez.yourname.workers.dev" value="${esc(S.settings.workerUrl)}"><p class="muted" style="margin:6px 0 0">Powers live conversation, and on iPhone the 🎙️ pronunciation check too.</p></div>
  <div class="field"><label>Model</label><select id="setModel"><option value="claude-haiku-4-5-20251001" ${S.settings.model.includes("haiku")?"selected":""}>Haiku — fast & cheap</option><option value="claude-sonnet-4-6" ${S.settings.model.includes("sonnet")?"selected":""}>Sonnet — smartest</option></select></div>
  <button class="btn soft" onclick="testAI()">🤖 Test AI connection</button>
  <h3 style="margin-top:18px">Shared sync (Firebase)</h3>
