@@ -1,5 +1,5 @@
 // Allez! service worker — offline after first load
-const CACHE = "allez-v3";
+const CACHE = "allez-v4";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {

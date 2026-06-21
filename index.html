@@ -440,7 +440,7 @@ const $=s=>document.querySelector(s);
 const esc=t=>String(t??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 const todayStr=()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
 const yesterStr=()=>{const d=new Date(Date.now()-864e5);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
-const norm=t=>String(t||"").toLowerCase().replace(/\d+/g,m=>{const n=parseInt(m,10);return (n>=0&&n<=999)?frNum(n):m}).normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/œ/g,"oe").replace(/[^a-z0-9]+/g," ").trim();
+const norm=t=>String(t||"").toLowerCase().replace(/\d+/g,m=>{const n=parseInt(m,10);return (n>=0&&n<=999)?frNum(n):m}).replace(/€/g," euros ").replace(/£/g," livres ").replace(/\$/g," dollars ").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/œ/g,"oe").replace(/[^a-z0-9]+/g," ").trim();
 function lev(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;let prev=Array.from({length:n+1},(_,i)=>i);for(let i=1;i<=m;i++){const cur=[i];for(let j=1;j<=n;j++){cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1))}prev=cur}return prev[n]}
 const sim=(a,b)=>{a=norm(a);b=norm(b);if(!a||!b)return 0;return 1-lev(a,b)/Math.max(a.length,b.length)};
 function wordMarks(target,heardArr){let best="",bs=0;
@@ -449,6 +449,7 @@ function wordMarks(target,heardArr){let best="",bs=0;
  const marks=target.split(/\s+/).map(t=>{const w=norm(t);
   return{t,hit:!w||hw.includes(w)||hw.some(x=>w.length>2&&(1-lev(x,w)/Math.max(x.length,w.length))>=0.7)}});
  return{score:bs,heard:best,marks}}
+function passed(r){return r.score>=0.72||(r.marks.length>=2&&r.marks.every(m=>m.hit))}
 let toastT;function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2600)}
 
 // ---------- STATE ----------
@@ -649,11 +650,11 @@ function reveal(){SES.phase="back";render();say(SES.q[SES.i].id)}
 async function micDrill(){const item=SES.q[SES.i];const btn=$("#drillMic");
  if(SR){
   try{btn&&btn.classList.add("live");const alts=await listen();btn&&btn.classList.remove("live");
-   const r=wordMarks(item.f,alts);SES.heard={ok:r.score>=0.72,text:r.heard,marks:r.marks};reveal()}
+   const r=wordMarks(item.f,alts);SES.heard={ok:passed(r),text:r.heard,marks:r.marks};reveal()}
   catch(e){btn&&btn.classList.remove("live");toast(micErr(e))}
   return}
  recToggle((text,err)=>{if(err){toast("Speech check failed — "+(err.message||"try again"));return}if(!text){toast("Didn't catch that — try again");return}
-  const r=wordMarks(item.f,[text]);SES.heard={ok:r.score>=0.72,text:r.heard,marks:r.marks};reveal()},btn)}
+  const r=wordMarks(item.f,[text]);SES.heard={ok:passed(r),text:r.heard,marks:r.marks};reveal()},btn)}
 function doGrade(g){const p=me();const item=SES.q[SES.i];grade(p,item.id,g);resetToday(p);p.today.cards++;
  if(g==="again"){SES.q.splice(Math.min(SES.q.length,SES.i+3),0,item)}
  SES.i++;
