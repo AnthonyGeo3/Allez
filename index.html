@@ -449,13 +449,16 @@ const yesterStr=()=>{const d=new Date(Date.now()-864e5);return d.getFullYear()+"
 const norm=t=>String(t||"").toLowerCase().replace(/\d+/g,m=>{const n=parseInt(m,10);return (n>=0&&n<=999)?frNum(n):m}).replace(/€/g," euros ").replace(/£/g," livres ").replace(/\$/g," dollars ").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/œ/g,"oe").replace(/[^a-z0-9]+/g," ").trim();
 function lev(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;let prev=Array.from({length:n+1},(_,i)=>i);for(let i=1;i<=m;i++){const cur=[i];for(let j=1;j<=n;j++){cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1))}prev=cur}return prev[n]}
 const sim=(a,b)=>{a=norm(a);b=norm(b);if(!a||!b)return 0;return 1-lev(a,b)/Math.max(a.length,b.length)};
+function phonkey(w){let x=String(w).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z]/g,"");if(!x)return"";
+ x=x.replace(/eau/g,"o").replace(/au/g,"o").replace(/ou/g,"u").replace(/oi/g,"wa").replace(/ai|ei|ay|ey/g,"e").replace(/ph/g,"f").replace(/ch/g,"s").replace(/qu/g,"k").replace(/q/g,"k").replace(/c([eiy])/g,"s$1").replace(/c/g,"k").replace(/gn/g,"n").replace(/h/g,"").replace(/x/g,"ks").replace(/y/g,"i").replace(/w/g,"v").replace(/[aeiou]+[nm]+/g,"N").replace(/[aeiou]+/g,"a").replace(/(.)\1+/g,"$1").replace(/[tsdpxz]+$/g,"");
+ return x}
 function wordMarks(target,heardArr){let best="",bs=0;
  for(const h of heardArr){const s=sim(h,target);if(s>=bs){bs=s;best=h}}
- const hw=norm(best).split(" ").filter(Boolean);
- const marks=target.split(/\s+/).map(t=>{const w=norm(t);
-  return{t,hit:!w||hw.includes(w)||hw.some(x=>w.length>2&&(1-lev(x,w)/Math.max(x.length,w.length))>=0.7)}});
+ const hw=norm(best).split(" ").filter(Boolean);const hwp=hw.map(phonkey);
+ const marks=target.split(/\s+/).map(t=>{const w=norm(t);const wp=phonkey(t);
+  return{t,hit:!w||hw.includes(w)||hw.some(x=>w.length>2&&(1-lev(x,w)/Math.max(x.length,w.length))>=0.8)||(wp&&hwp.some(xp=>xp&&(1-lev(xp,wp)/Math.max(xp.length,wp.length))>=0.8))}});
  return{score:bs,heard:best,marks}}
-function passed(r){return r.score>=0.72||(r.marks.length>=2&&r.marks.every(m=>m.hit))}
+function passed(r){return r.score>=0.85||r.marks.every(m=>m.hit)}
 let toastT;function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2600)}
 
 // ---------- STATE ----------
@@ -921,7 +924,7 @@ function renderSettings(){const p=me();loadVoices();
  <p class="muted">Sync: ${esc(fbStatus)}</p>
  <button class="btn big" onclick="saveSettings()">Save settings</button>
  <button class="btn ghost big" style="margin-top:10px" onclick="resetProfile()">Reset ${S.profile}'s progress</button>
- <p class="muted" style="margin-top:14px;text-align:center">Allez ! v1 · made for Anthony & Amy · allez allez allez 🔴</p>`}
+ <p class="muted" style="margin-top:14px;text-align:center">Allez ! · build 8 · made for Anthony & Amy · allez allez allez 🔴</p>`}
 window.setWho=n=>{S.profile=n;S.chosen=true;save();renderSettings();render()};
 window.setLevel=l=>{me().level=l;save();syncPush();renderSettings()};
 window.setPhon=b=>{S.settings.phon=b;save();renderSettings()};
