@@ -40,7 +40,7 @@ Single-file French-learning PWA for **two named users** (Anthony, Amy) prepping 
 
 ## Speech input (two paths)
 - **Android/desktop Chrome:** browser `SpeechRecognition` (instant, offline). **iOS is forced off** (`SR` null on iOS) because Safari's implementation is broken — goes live, returns nothing.
-- **iPhone:** when a Worker URL is set, the mic records via `MediaRecorder` (`recToggle`, tap-to-start/tap-to-stop, 6s safety auto-stop) → POSTs the clip to `/stt` → feeds the transcript into the **same `wordMarks` scoring** as the browser path. `micReady() = SR || sttReady()` gates every mic button, so on iOS-without-Worker the mic simply doesn't show (no broken button). Needs connectivity; Reveal is the offline fallback.
+- **iPhone:** when a Worker URL is set, the mic records via `MediaRecorder` (`recToggle`, tap-to-start/tap-to-stop, 6s safety auto-stop) → POSTs the clip to `/stt` → feeds the transcript into the **same `wordMarks` scoring** as the browser path. `micReady() = SR || sttReady()` gates every mic button, so on iOS-without-Worker the mic simply doesn't show (no broken button). Needs connectivity; Reveal is the offline fallback. Drill scoring now prefers the Worker /stt path on **all** devices when a Worker is set, sending the target phrase as `?p=` which the Worker passes to Whisper as `initial_prompt` (with `condition_on_previous_text:false`) to stop it mis-hearing isolated learner speech; browser SR is the no-Worker fallback. Chat STT sends no prompt (free conversation, no target).
 
 ## How to test (do this every change — there is no test runner)
 1. **Syntax** — extract inline JS and `node --check`:

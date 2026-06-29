@@ -517,7 +517,7 @@ function micErr(e){const m=(e&&e.message)||"";
 // Recorded-audio path for devices where browser recognition doesn't work (iPhone):
 // capture a clip, POST it to the Worker's /stt route (Whisper), hand back the text.
 let REC=null,recChunks=[],recStream=null,recTimer=null,RECORDING=false;
-async function recToggle(onResult,btn){
+async function recToggle(onResult,btn,prompt){
  if(!RECORDING){
   try{
    recStream=await navigator.mediaDevices.getUserMedia({audio:true});
@@ -527,7 +527,7 @@ async function recToggle(onResult,btn){
     try{recStream.getTracks().forEach(t=>t.stop())}catch(e){}
     const blob=new Blob(recChunks,{type:(recChunks[0]&&recChunks[0].type)||"audio/mp4"});
     try{
-     const r=await fetch(sttUrl(),{method:"POST",headers:{"Content-Type":blob.type||"application/octet-stream"},body:blob});
+     const r=await fetch(prompt?sttUrl()+"?p="+encodeURIComponent(prompt):sttUrl(),{method:"POST",headers:{"Content-Type":blob.type||"application/octet-stream"},body:blob});
      if(!r.ok)throw new Error("HTTP "+r.status);
      const d=await r.json();if(d.error)throw new Error(d.error);
      onResult((d.text||"").trim(),null);
@@ -535,7 +535,7 @@ async function recToggle(onResult,btn){
    };
    REC.start();RECORDING=true;btn&&btn.classList.add("live");
    toast("Recording — tap the mic again to stop");
-   clearTimeout(recTimer);recTimer=setTimeout(()=>{if(RECORDING)recToggle(onResult,btn)},6000);
+   clearTimeout(recTimer);recTimer=setTimeout(()=>{if(RECORDING)recToggle(onResult,btn,prompt)},6000);
   }catch(e){toast(isIOS?"Let Safari use the mic, then tap again":"Mic didn't start — check permission")}
  }else{
   RECORDING=false;clearTimeout(recTimer);btn&&btn.classList.remove("live");toast("Checking…");
@@ -654,13 +654,16 @@ function prepCard(){const p=me();const item=SES.q[SES.i];resetToday(p);
  if(SES.isNew||SES.dir==="listen")setTimeout(()=>say(item.id),350)}
 function reveal(){SES.phase="back";render();say(SES.q[SES.i].id)}
 async function micDrill(){const item=SES.q[SES.i];const btn=$("#drillMic");
+ if(sttReady()){
+  recToggle((text,err)=>{if(err){toast("Speech check failed — "+(err.message||"try again"));return}if(!text){toast("Didn't catch that — try again");return}
+   const r=wordMarks(item.f,[text]);SES.heard={ok:passed(r),text:r.heard,marks:r.marks};reveal()},btn,item.f);
+  return}
  if(SR){
   try{btn&&btn.classList.add("live");const alts=await listen();btn&&btn.classList.remove("live");
    const r=wordMarks(item.f,alts);SES.heard={ok:passed(r),text:r.heard,marks:r.marks};reveal()}
   catch(e){btn&&btn.classList.remove("live");toast(micErr(e))}
   return}
- recToggle((text,err)=>{if(err){toast("Speech check failed — "+(err.message||"try again"));return}if(!text){toast("Didn't catch that — try again");return}
-  const r=wordMarks(item.f,[text]);SES.heard={ok:passed(r),text:r.heard,marks:r.marks};reveal()},btn)}
+ toast("No mic here — use Reveal")}
 function doGrade(g){const p=me();const item=SES.q[SES.i];grade(p,item.id,g);resetToday(p);p.today.cards++;
  if(g==="again"){SES.q.splice(Math.min(SES.q.length,SES.i+3),0,item)}
  SES.i++;
@@ -805,8 +808,9 @@ function practBucket(s){if(s.g)return s.g==="easy"?"facile":"bien";return (s.iv>
 function practData(p){const out={};for(const ph of PHRASES){const s=p.srs[ph.id];if(!s)continue;if(!out[ph.c])out[ph.c]={bien:[],facile:[]};out[ph.c][practBucket(s)].push(ph)}return out}
 window.practTap=id=>{if(PRACT_PHRASE===id){PRACT_PHRASE=null}else{PRACT_PHRASE=id;PRACT_HEARD=null;say(id)}render()};
 async function practMic(id){const item=PHRASES.find(x=>x.id===id);const btn=$("#practMic");
+ if(sttReady()){recToggle((text,err)=>{if(err){toast("Speech check failed — "+(err.message||"try again"));return}if(!text){toast("Didn't catch that — try again");return}const r=wordMarks(item.f,[text]);PRACT_HEARD={id,ok:passed(r),text:r.heard,marks:r.marks};render()},btn,item.f);return}
  if(SR){try{btn&&btn.classList.add("live");const alts=await listen();btn&&btn.classList.remove("live");const r=wordMarks(item.f,alts);PRACT_HEARD={id,ok:passed(r),text:r.heard,marks:r.marks};render()}catch(e){btn&&btn.classList.remove("live");toast(micErr(e))}return}
- recToggle((text,err)=>{if(err){toast("Speech check failed — "+(err.message||"try again"));return}if(!text){toast("Didn't catch that — try again");return}const r=wordMarks(item.f,[text]);PRACT_HEARD={id,ok:passed(r),text:r.heard,marks:r.marks};render()},btn)}
+ toast("No mic here — tap 🔊 to listen instead")}
 window.practMic=practMic;
 function practPhraseRow(ph){const open=PRACT_PHRASE===ph.id;
  if(!open)return `<button class="scen" style="width:100%;text-align:left;margin-bottom:8px;display:flex;align-items:center;gap:10px" onclick="practTap('${ph.id}')"><span style="flex:1">${esc(ph.e)}</span><span class="muted">🔊</span></button>`;

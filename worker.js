@@ -27,11 +27,15 @@ export default {
       try {
         const buf = await request.arrayBuffer();
         if (!buf || buf.byteLength < 1200) return json({ text: "" }, 200, cors); // empty / too short to be speech
-        const out = await env.AI.run("@cf/openai/whisper-large-v3-turbo", {
+        const prompt = url.searchParams.get("p") || "";
+        const input = {
           audio: toBase64(buf),
           language: "fr",
           task: "transcribe",
-        });
+          condition_on_previous_text: false, // curbs hallucinated runaway transcriptions
+        };
+        if (prompt) input.initial_prompt = prompt; // bias toward the phrase the learner is attempting
+        const out = await env.AI.run("@cf/openai/whisper-large-v3-turbo", input);
         return json({ text: (out && out.text ? out.text : "").trim() }, 200, cors);
       } catch (e) {
         return json({ error: String((e && e.message) || e) }, 500, cors);
